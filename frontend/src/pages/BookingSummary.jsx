@@ -18,7 +18,7 @@ function BookingSummary() {
       }
 
       try {
-        const res = await fetch(`http://localhost:5000/api/bookings/${id}`, {
+        const res = await fetch(`https://showsnap-backend-ioiz.onrender.com/api/bookings/${id}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
 
