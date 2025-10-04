@@ -8,7 +8,7 @@ function TheatersPage() {
   useEffect(() => {
     const fetchTheaters = async () => {
       try {
-        const res = await fetch('http://localhost:5000/api/theaters');
+        const res = await fetch('https://showsnap-backend-ioiz.onrender.com/api/theaters');
         const data = await res.json();
 
         // Ensure we have a valid array
