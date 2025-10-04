@@ -16,7 +16,7 @@ function MyBookings() {
       return;
     }
 
-    fetch('http://localhost:5000/api/bookings/my-bookings', {
+    fetch('https://showsnap-backend-ioiz.onrender.com/api/bookings/my-bookings', {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(async res => {
@@ -38,7 +38,7 @@ function MyBookings() {
     setCancellingId(bookingId);
 
     try {
-      const res = await fetch(`http://localhost:5000/api/bookings/${bookingId}/cancel`, {
+      const res = await fetch(`https://showsnap-backend-ioiz.onrender.com/api/bookings/${bookingId}/cancel`, {
         method: 'PATCH',
         headers: {
           Authorization: `Bearer ${token}`,
