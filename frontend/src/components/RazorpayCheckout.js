@@ -1,6 +1,6 @@
 import toast from 'react-hot-toast';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const API_URL = process.env.REACT_APP_API_URL || 'hhttps://showsnap-backend-ioiz.onrender.com';
 const RAZORPAY_KEY = process.env.REACT_APP_RAZORPAY_KEY || 'rzp_test_RIn3HX6YPDL3Nf';
 
 // 🔧 Unified fetch helper with token + error handling
