@@ -2,10 +2,10 @@ import React, { useState, useEffect, useMemo, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchPublicMovies } from '../services/api';
 import { AuthContext } from '../context/AuthContext';
+import { LocationContext } from '../context/LocationContext';
+import { FaGooglePlay, FaApple, FaEnvelope } from 'react-icons/fa';
 
 function Home() {
-  const [nowShowingMovies, setNowShowingMovies] = useState([]);
-  const [upcomingMovies, setUpcomingMovies] = useState([]);
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -13,24 +13,46 @@ function Home() {
   const [minRating, setMinRating] = useState(0);
   const [error, setError] = useState('');
   const [trailerModal, setTrailerModal] = useState({ open: false, url: '' });
+  const [nowShowingMovies, setNowShowingMovies] = useState([]);
+  const [upcomingMovies, setUpcomingMovies] = useState([]);
+
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
+  const { location } = useContext(LocationContext);
 
+  // 🔄 Load movies based on location
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
+
         const [nowShowingRes, upcomingRes] = await Promise.all([
-          fetchPublicMovies({ isUpcoming: false }), 
-          fetchPublicMovies({ isUpcoming: true }),  
+          fetchPublicMovies({ isUpcoming: false }),
+          fetchPublicMovies({ isUpcoming: true }),
         ]);
-        
+
         const nowShowingList = Array.isArray(nowShowingRes.data.movies) ? nowShowingRes.data.movies : [];
         const upcomingList = Array.isArray(upcomingRes.data.movies) ? upcomingRes.data.movies : [];
-        
-        setNowShowingMovies(nowShowingList);
-        setUpcomingMovies(upcomingList); 
-        setFeaturedIndex(0); 
+
+        const filteredNowShowing = location
+          ? nowShowingList.filter(movie =>
+              movie.embeddedTheaters?.some(
+                theater => theater.location?.toLowerCase() === location.toLowerCase()
+              )
+            )
+          : nowShowingList;
+
+        const filteredUpcoming = location
+          ? upcomingList.filter(movie =>
+              movie.embeddedTheaters?.some(
+                theater => theater.location?.toLowerCase() === location.toLowerCase()
+              )
+            )
+          : upcomingList;
+
+        setNowShowingMovies(filteredNowShowing);
+        setUpcomingMovies(filteredUpcoming);
+        setFeaturedIndex(0);
         setLoading(false);
       } catch (err) {
         console.error('❌ Error loading data:', err.response?.data || err.message);
@@ -38,26 +60,29 @@ function Home() {
         setLoading(false);
       }
     };
-    loadData();
-  }, []);
 
+    loadData();
+  }, [location]);
+
+  // ✅ Filtered Now Showing
   const visibleMovies = useMemo(() => {
-    return nowShowingMovies.filter((movie) => {
-      return (
+    return nowShowingMovies.filter(
+      (movie) =>
         movie.title?.toLowerCase().includes(searchTerm.toLowerCase()) &&
         (selectedGenre
           ? movie.genre?.toLowerCase().includes(selectedGenre.toLowerCase())
           : true) &&
         movie.rating >= minRating
-      );
-    });
+    );
   }, [nowShowingMovies, searchTerm, selectedGenre, minRating]);
 
+  // ✅ Genres dropdown
   const genres = useMemo(
     () => [...new Set(nowShowingMovies.map((m) => m.genre).filter(Boolean))].sort(),
     [nowShowingMovies]
   );
-  
+
+  // 🎞️ Featured carousel auto-slide
   useEffect(() => {
     if (visibleMovies.length > 0) {
       const interval = setInterval(() => {
@@ -86,6 +111,7 @@ function Home() {
         </p>
       </header>
 
+      {/* Featured Movie Carousel */}
       <section className="relative h-96 rounded-xl overflow-hidden shadow-lg mb-8">
         {featuredMovie?.posterUrl ? (
           <img
@@ -132,26 +158,11 @@ function Home() {
                 Watch Trailer
               </button>
             )}
-            {featuredMovie?._id && (
-              <button
-                onClick={() => navigate(`/book/${featuredMovie._id}`)}
-                className="px-5 py-2 bg-red-600 hover:bg-red-700 rounded text-white font-semibold"
-              >
-                Book Now
-              </button>
-            )}
           </div>
         </div>
-        <button onClick={() => setFeaturedIndex((featuredIndex - 1 + visibleMovies.length) % visibleMovies.length)}
-          className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 p-2 rounded-full hover:bg-black/70">
-          ◀
-        </button>
-        <button onClick={() => setFeaturedIndex((featuredIndex + 1) % visibleMovies.length)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 p-2 rounded-full hover:bg-black/70">
-          ▶
-        </button>
       </section>
 
+      {/* Filters */}
       <div className="mb-6">
         <input
           type="text"
@@ -201,6 +212,7 @@ function Home() {
         </div>
       </div>
 
+      {/* Now Showing */}
       <section>
         <h3 className="text-2xl font-semibold mb-4">Now Showing</h3>
         {visibleMovies.length === 0 ? (
@@ -245,6 +257,7 @@ function Home() {
                   <p className="text-sm text-yellow-500 font-semibold mt-1">
                     ⭐ {typeof movie.rating === 'number' ? movie.rating : 'N/A'}
                   </p>
+                  {/* Book Now button removed */}
                 </div>
               </div>
             ))}
@@ -252,83 +265,156 @@ function Home() {
         )}
       </section>
 
+      {/* Coming Soon */}
       <section className="mt-12">
         <h3 className="text-2xl font-semibold mb-4">Coming Soon</h3>
         {upcomingMovies.length === 0 ? (
           <p className="text-center text-gray-400">No upcoming movies listed.</p>
         ) : (
           <div className="flex gap-6 overflow-x-auto pb-4">
-            {upcomingMovies.map((movie) => (
-              <div
-                key={movie._id}
-                onClick={() => navigate(`/book/${movie._id}`)}
-                className="min-w-[180px] cursor-pointer rounded-lg overflow-hidden shadow-md bg-white text-black hover:shadow-xl transition duration-300"
-              >
-                {movie.posterUrl ? (
-                  <img
-                    src={movie.posterUrl}
-                    alt={movie.title}
-                    className="w-full h-60 object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-60 bg-gray-800 flex items-center justify-center text-white text-sm">
-                    No Poster
-                  </div>
-                )}
-                <div className="p-2">
-                  <h4 className="font-semibold text-md">{movie.title}</h4>
-                  {movie.releaseDate && (
-                    <p className="text-xs text-gray-500">
-                      {new Date(movie.releaseDate).toLocaleDateString()}
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
+            {upcomingMovies.map((movie) => {
+  const isUpcoming = new Date(movie.releaseDate) > new Date();
+
+  return (
+    <div
+      key={movie._id}
+      onClick={() => navigate(`/movie/${movie._id}`)} // ✅ Navigate to detail page
+      className="min-w-[180px] cursor-pointer rounded-lg overflow-hidden shadow-md bg-white text-black hover:shadow-xl transition duration-300"
+    >
+      {movie.posterUrl ? (
+        <img
+          src={movie.posterUrl}
+          alt={movie.title}
+          className="w-full h-60 object-cover"
+        />
+      ) : (
+        <div className="w-full h-60 bg-gray-800 flex items-center justify-center text-white text-sm">
+          No Poster
+        </div>
+      )}
+      <div className="p-2">
+        <h4 className="font-semibold text-md">{movie.title}</h4>
+        {movie.releaseDate && (
+          <p className="text-xs text-gray-500">
+            {new Date(movie.releaseDate).toLocaleDateString()}
+          </p>
+        )}
+
+        {/* 🎬 Trailer Button */}
+        {movie.trailerUrl && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation(); // prevent card click
+              window.open(movie.trailerUrl, '_blank');
+            }}
+            className="mt-2 w-full bg-gray-800 hover:bg-gray-700 text-white text-sm py-1 rounded transition"
+          >
+            Watch Trailer
+          </button>
+        )}
+
+        {/* 🎟️ Booking Button */}
+        {isUpcoming ? (
+          <button
+            disabled
+            className="mt-2 w-full bg-gray-300 text-gray-600 text-sm py-1 rounded cursor-not-allowed"
+            title="Booking will open closer to release"
+          >
+            Coming Soon
+          </button>
+        ) : (
+          <button
+            onClick={() => navigate(`/book/${movie._id}`)}
+            className="mt-2 w-full bg-red-600 hover:bg-red-700 text-white text-sm py-1 rounded transition"
+          >
+            Book Now
+          </button>
+        )}
+      </div>
+    </div>
+  );
+})}
           </div>
         )}
       </section>
 
+      {/* Trailer Modal */}
       {trailerModal.open && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
-          onClick={() => setTrailerModal({ open: false, url: '' })}
-        >
-          <div
-            className="w-full max-w-3xl aspect-video bg-black relative"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="relative w-full max-w-3xl bg-black rounded-lg overflow-hidden">
+            <button
+              onClick={() => setTrailerModal({ open: false, url: '' })}
+              className="absolute top-2 right-2 text-white text-xl font-bold px-2 py-1 hover:text-red-500"
+            >
+              ✕
+            </button>
             <iframe
-              className="w-full h-full"
+              className="w-full h-[480px]"
               src={trailerModal.url.replace('watch?v=', 'embed/')}
               title="Trailer"
               frameBorder="0"
               allowFullScreen
-            />
-            <button
-              onClick={() => setTrailerModal({ open: false, url: '' })}
-              className="absolute top-2 right-2 text-white bg-red-600 rounded-full w-8 h-8 flex items-center justify-center"
-            >
-              ✕
-            </button>
+            ></iframe>
           </div>
         </div>
       )}
 
-      <footer className="mt-16 text-center text-gray-500 text-sm">
-        <p>ShowSnap — Your gateway to cinematic experiences.</p>
-        <p>Book smarter, watch better.</p>
-        <div className="mt-2 flex justify-center gap-4 text-gray-400">
-          <a href="https://play.google.com" target="_blank" rel="noopener noreferrer">Google Play</a>
-          <a href="https://www.apple.com/app-store/" target="_blank" rel="noopener noreferrer">App Store</a>
-        </div>
-        <div className="mt-4">
-          <p>Contact us: <a href="mailto:support@showsnap.in" className="text-blue-400">support@showsnap.in</a></p>
-          <p className="mt-1">© 2025 ShowSnap. All rights reserved.</p>
-        </div>
-      </footer>
-    </div>
-  );
-}
+      {/* Footer */}
+       <footer className="bg-[#121212] text-gray-400 py-10 mt-16 border-t border-gray-800">
+            <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-8">
+              {/* 🪩 Brand & Tagline */}
+              <div>
+                <h2 className="text-red-500 text-2xl font-bold mb-2">ShowSnap</h2>
+                <p>Your gateway to cinematic experiences.</p>
+                <p className="mt-1 text-sm">Book smarter, watch better.</p>
+              </div>
+      
+              {/* 📱 App Links */}
+              <div>
+                <h3 className="text-white text-lg font-semibold mb-2">Get the App</h3>
+                <div className="flex gap-4 items-center">
+                  <a
+                    href="https://play.google.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 hover:text-white"
+                  >
+                    <FaGooglePlay /> Google Play
+                  </a>
+                  <a
+                    href="https://www.apple.com/app-store/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 hover:text-white"
+                  >
+                    <FaApple /> App Store
+                  </a>
+                </div>
+              </div>
+      
+              {/* 📬 Contact Info */}
+              <div>
+                <h3 className="text-white text-lg font-semibold mb-2">Contact Us</h3>
+                <p className="flex items-center gap-2">
+                  <FaEnvelope className="text-red-500" />
+                  <a
+                    href="mailto:support@showsnap.in"
+                    className="text-blue-400 hover:underline"
+                  >
+                    support@showsnap.in
+                  </a>
+                </p>
+                <p className="mt-2 text-sm">© 2025 ShowSnap. All rights reserved.</p>
+              </div>
+            </div>
+      
+            {/* 🌐 Bottom Bar */}
+            <div className="mt-10 text-center text-xs text-gray-500">
+              <p>Made with ❤️ in Mumbai</p>
+            </div>
+          </footer>
+          </div>
+        );
+      }
 
 export default Home;

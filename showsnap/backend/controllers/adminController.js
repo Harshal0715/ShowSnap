@@ -1,6 +1,7 @@
 import Movie from '../models/Movie.js';
 import Booking from '../models/Booking.js';
 import User from '../models/User.js';
+import Theater from '../models/Theater.js';
 import logger from '../utils/logger.js';
 
 const log = logger || console;
@@ -23,35 +24,119 @@ export const createMovie = async (req, res) => {
       return res.status(400).json({ error: `Missing fields: ${missing.join(', ')}` });
     }
 
-    if (!Array.isArray(theaters)) {
-      return res.status(400).json({ error: 'Theaters must be an array' });
+    const seatRows = ['A', 'B', 'C', 'D'];
+    const seatCols = [1, 2, 3, 4, 5, 6];
+    const allSeats = seatRows.flatMap(row => seatCols.map(col => `${row}${col}`));
+
+    const generateBlockedSeats = () => {
+      const total = Math.floor(Math.random() * 10);
+      const shuffled = [...allSeats].sort(() => 0.5 - Math.random());
+      return shuffled.slice(0, total);
+    };
+
+    const generateDefaultShowtimes = (releaseDate) => {
+      const base = new Date(releaseDate);
+      return [
+        {
+          startTime: base,
+          screen: 'Screen 1',
+          availableSeats: 100,
+          blockedSeats: generateBlockedSeats()
+        },
+        {
+          startTime: new Date(base.getTime() + 3 * 60 * 60 * 1000),
+          screen: 'Screen 2',
+          availableSeats: 100,
+          blockedSeats: generateBlockedSeats()
+        }
+      ];
+    };
+
+    // 🧩 Always fallback to default theaters if none provided
+    let theaterIds = Array.isArray(theaters) && theaters.length
+      ? theaters.map(t => (typeof t === 'string' ? t : t._id))
+      : [];
+
+    if (theaterIds.length === 0) {
+      const defaultTheaters = await Theater.find().limit(4);
+      theaterIds = defaultTheaters.map(t => t._id.toString());
     }
 
-    const formattedTheaters = theaters.map(t => {
-  if (typeof t === 'string') {
-    return { _id: t, showtimes: [] };
-  }
-  return {
-    _id: t._id,
-    showtimes: Array.isArray(t.showtimes)
-      ? t.showtimes.map(s => new Date(s))
-      : []
-  };
-});
+    const formattedTheaters = await Promise.all(
+      theaterIds.map(async (theaterId) => {
+        const theaterDoc = await Theater.findById(theaterId);
+        if (!theaterDoc) return null;
+
+        const showtimes = generateDefaultShowtimes(releaseDate);
+
+        return {
+          name: theaterDoc.name,
+          location: theaterDoc.location,
+          showtimes
+        };
+      })
+    );
+
+    const validTheaters = formattedTheaters.filter(Boolean);
 
     const movie = new Movie({
-  title, description, genre, rating, duration,
-  posterUrl, trailerUrl, releaseDate, language,
-  cast,
-  theaters: formattedTheaters
-});
+      title,
+      description,
+      genre,
+      rating,
+      duration,
+      posterUrl,
+      trailerUrl,
+      releaseDate: new Date(releaseDate),
+      language,
+      cast,
+      theaters: validTheaters
+    });
 
     await movie.save();
-    log.info(`🎬 Movie created: ${title}`);
-    res.status(201).json({ message: '✅ Movie created', movie });
+
+    // 🔗 Link movie to theaters and embed showtimes
+    const times = ['10:00', '13:30', '17:00', '21:30'];
+    const today = new Date();
+    const dateStr = today.toISOString().split('T')[0];
+    const embedded = [];
+
+    for (const theater of validTheaters) {
+      const theaterDoc = await Theater.findOne({ name: theater.name, location: theater.location });
+      if (!theaterDoc) continue;
+
+      const showtimes = times.map(time => ({
+        startTime: new Date(`${dateStr}T${time}:00`),
+        screen: 'Screen 1',
+        availableSeats: 100,
+        blockedSeats: [],
+        movie: movie._id
+      }));
+
+      await Theater.updateOne(
+        { _id: theaterDoc._id },
+        {
+          $push: { showtimes: { $each: showtimes } },
+          $addToSet: { movieTitles: movie.title }
+        }
+      );
+
+      embedded.push({
+        name: theater.name,
+        location: theater.location,
+        showtimes
+      });
+    }
+
+    await Movie.findByIdAndUpdate(movie._id, {
+      $set: { embeddedTheaters: embedded }
+    });
+
+    log.info(`🎬 Movie created and linked: ${title}`);
+    res.status(201).json({ message: '✅ Movie created and linked to theaters', movie });
   } catch (err) {
     log.error(`❌ Movie creation failed: ${err.message}`);
-    res.status(500).json({ error: 'Server error while creating movie' });
+    res.status(500).json({ error: err.message || 'Server error while creating movie' });
   }
 };
 
@@ -189,7 +274,11 @@ export const getMovieById = async (req, res) => {
   try {
     const { id } = req.params;
     const movie = await Movie.findById(id);
-    if (!movie) return res.status(404).json({ error: 'Movie not found' });
+
+    if (!movie) {
+      return res.status(404).json({ error: 'Movie not found' });
+    }
+
     res.json(movie);
   } catch (err) {
     log.error(`❌ Failed to fetch movie: ${err.message}`);
@@ -197,10 +286,19 @@ export const getMovieById = async (req, res) => {
   }
 };
 
-// 📚 Get all movies
+// 📽️ Get all movies
 export const getAllMovies = async (req, res) => {
   try {
-    const movies = await Movie.find().sort({ releaseDate: -1 });
+    const { isUpcoming } = req.query;
+
+    const filter = {};
+    if (isUpcoming === 'true') {
+      filter.releaseDate = { $gt: new Date() };
+    } else if (isUpcoming === 'false') {
+      filter.releaseDate = { $lte: new Date() };
+    }
+
+    const movies = await Movie.find(filter).sort({ releaseDate: -1 });
     res.json({ count: movies.length, movies });
   } catch (err) {
     log.error(`❌ Failed to fetch movies: ${err.message}`);
@@ -208,7 +306,7 @@ export const getAllMovies = async (req, res) => {
   }
 };
 
-// 🛠 Ping admin (optional health check)
+// 🛡️ Admin ping
 export const pingAdmin = (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Access denied' });

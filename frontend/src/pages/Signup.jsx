@@ -96,7 +96,8 @@ function Signup() {
               value={form.name}
               onChange={handleChange}
               required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-black bg-white placeholder-gray-400"
+              placeholder="Enter your full name"
             />
           </div>
 
@@ -110,7 +111,8 @@ function Signup() {
               value={form.email}
               onChange={handleChange}
               required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-black bg-white placeholder-gray-400"
+              placeholder="you@example.com"
             />
           </div>
 
@@ -139,6 +141,7 @@ function Signup() {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
+              placeholder="Re-enter your password"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-black placeholder-gray-400 bg-white"
             />
             <div className="mt-2 text-sm text-gray-600">

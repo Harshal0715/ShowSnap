@@ -30,8 +30,8 @@ const apiFetch = async (endpoint, options = {}) => {
   return data;
 };
 
-// 💳 Razorpay payment handler
-const handleRazorpayPayment = async (payload, setLoading, navigate) => {
+// 💳 Razorpay payment handler with cancellation support
+const handleRazorpayPayment = async (payload, setLoading, navigate, onSuccess, onCancel) => {
   const token = localStorage.getItem('token');
   const user = JSON.parse(localStorage.getItem('user'));
 
@@ -40,7 +40,6 @@ const handleRazorpayPayment = async (payload, setLoading, navigate) => {
     return;
   }
 
-  // ✅ Validate payload
   const isValidPayload =
     payload &&
     payload.amount > 0 &&
@@ -61,7 +60,6 @@ const handleRazorpayPayment = async (payload, setLoading, navigate) => {
     setLoading?.(true);
     console.log('🔍 Booking Payload:', payload);
 
-    // 🧾 Step 1: Create Razorpay order
     const orderResponse = await apiFetch('/api/payments/create-order', {
       method: 'POST',
       body: JSON.stringify({ amount: payload.amount }),
@@ -74,14 +72,12 @@ const handleRazorpayPayment = async (payload, setLoading, navigate) => {
       return;
     }
 
-    // 🧠 Step 2: Ensure Razorpay SDK is loaded
     if (!window.Razorpay) {
       toast.error('Razorpay SDK not loaded. Please refresh.');
       setLoading?.(false);
       return;
     }
 
-    // 🛒 Step 3: Configure Razorpay checkout
     const options = {
       key: RAZORPAY_KEY,
       amount: payload.amount,
@@ -98,7 +94,6 @@ const handleRazorpayPayment = async (payload, setLoading, navigate) => {
             return;
           }
 
-          // ✅ Step 4: Verify payment and create booking
           const verifyRes = await apiFetch('/api/payments/verify', {
             method: 'POST',
             body: JSON.stringify({
@@ -126,6 +121,7 @@ const handleRazorpayPayment = async (payload, setLoading, navigate) => {
           toast.success('🎉 Booking successful!');
           if (verifyRes.bookingId) {
             navigate(`/my-bookings/${verifyRes.bookingId}`);
+            if (onSuccess) onSuccess();
           } else {
             toast.error('Booking ID missing in response.');
           }
@@ -136,6 +132,14 @@ const handleRazorpayPayment = async (payload, setLoading, navigate) => {
           setLoading?.(false);
         }
       },
+      modal: {
+        ondismiss: () => {
+          console.log('❌ Payment cancelled by user');
+          toast.error('Payment was cancelled. Booking not completed.');
+          setLoading?.(false);
+          if (onCancel) onCancel();
+        }
+      },
       prefill: {
         name: user.name || 'Guest',
         email: user.email || 'guest@example.com',
@@ -144,7 +148,6 @@ const handleRazorpayPayment = async (payload, setLoading, navigate) => {
       theme: { color: '#F37254' },
     };
 
-    // 🧾 Step 5: Open Razorpay checkout
     new window.Razorpay(options).open();
   } catch (err) {
     console.error('Error initiating Razorpay:', err);

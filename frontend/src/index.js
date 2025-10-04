@@ -4,11 +4,13 @@ import App from './App';
 import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import './index.css'; // Tailwind or global styles
+import { LocationProvider } from './context/LocationContext';
 
 // 🎬 Mounting the ShowSnap App
 const root = ReactDOM.createRoot(document.getElementById('root'));
 
 root.render(
+  <LocationProvider>
   <React.StrictMode>
     {/* 🌐 Global Routing */}
     <BrowserRouter>
@@ -19,4 +21,5 @@ root.render(
       </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>
+  </LocationProvider>
 );

@@ -44,8 +44,11 @@ const createBooking = async ({
   if (existingBookings.length > 0) {
     const bookedSeats = existingBookings.flatMap(b => b.seats);
     const conflictSeats = seats.filter(s => bookedSeats.includes(s));
+    log.warn(`⚠️ Seat conflict: ${conflictSeats.join(', ')}`);
     throw new Error(`Seats already booked: ${conflictSeats.join(', ')}`);
   }
+
+  const expiresAt = paymentStatus === 'paid' ? null : new Date(Date.now() + 15 * 60 * 1000); // optional expiry
 
   const booking = new Booking({
     user: userId,
@@ -55,7 +58,8 @@ const createBooking = async ({
     showtimeDate: showtime,
     status: 'confirmed',
     amount,
-    paymentStatus
+    paymentStatus,
+    expiresAt
   });
 
   await booking.save();
@@ -151,7 +155,7 @@ export const cancelBooking = async (req, res) => {
   try {
     const booking = await Booking.findByIdAndUpdate(
       req.params.bookingId,
-      { status: 'cancelled' },
+      { status: 'cancelled', cancelledAt: new Date() },
       { new: true }
     ).populate('user movie');
 

@@ -1,11 +1,14 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import handleRazorpayPayment from '../components/RazorpayCheckout';
 import axios from 'axios';
+import { toast } from 'react-hot-toast';
 
 function BookMovie() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  console.log('Current location:', location.pathname);
   const [movie, setMovie] = useState(null);
   const [theaters, setTheaters] = useState([]);
   const [selectedTheaterIndex, setSelectedTheaterIndex] = useState('');
@@ -15,21 +18,35 @@ function BookMovie() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(true);
+  const [bookedSeats, setBookedSeats] = useState([]);
 
   const rows = useMemo(() => ['A', 'B', 'C', 'D'], []);
   const cols = useMemo(() => [1, 2, 3, 4, 5, 6], []);
   const pricePerSeat = 250;
   const totalPrice = selectedSeats.length * pricePerSeat;
+
   const selectedTheater = theaters?.[Number(selectedTheaterIndex)];
 
-  const seatMap = useMemo(() => {
-    return rows.flatMap(row =>
-      cols.map(col => ({
-        id: `${row}${col}`,
-        status: Math.random() < 0.2 ? 'booked' : 'available'
-      }))
-    );
-  }, [rows, cols]);
+  const selectedShowtimeObj = selectedTheater?.showtimes?.find(st => {
+    const stTimeRaw = st?.startTime || st;
+    const selectedTimeRaw = selectedShowtime;
+    const stTime = new Date(stTimeRaw);
+    const selectedTime = new Date(selectedTimeRaw);
+    if (isNaN(stTime.getTime()) || isNaN(selectedTime.getTime())) return false;
+    return stTime.toISOString() === selectedTime.toISOString();
+  });
+
+  const blockedSeats = selectedShowtimeObj?.blockedSeats || [];
+  const allBookedSeats = [...new Set([...bookedSeats, ...blockedSeats])];
+
+  //const seatMap = useMemo(() => {
+    //return rows.flatMap(row =>
+    //  cols.map(col => ({
+       // id: `${row}${col}`,
+        //status: 'available'
+     // }))
+    //);
+  //}, [rows, cols]);
 
   useEffect(() => {
     const fetchMovieAndTheaters = async () => {
@@ -57,7 +74,7 @@ function BookMovie() {
         setTheaters(validTheaters);
       } catch (err) {
         console.error('❌ Error fetching movie or theaters:', err.response?.data?.error || err.message);
-        setError('Failed to load movie or theater data. The movie might not be playing in any theaters.');
+        setError('Failed to load movie or theater data.');
       } finally {
         setLoading(false);
       }
@@ -66,9 +83,32 @@ function BookMovie() {
     fetchMovieAndTheaters();
   }, [id]);
 
+  useEffect(() => {
+    const fetchBookedSeats = async () => {
+      if (!selectedShowtimeObj || !selectedTheater || !movie) return;
+
+      try {
+        const res = await axios.get('http://localhost:5000/api/bookings/booked-seats', {
+          params: {
+            movieId: movie._id,
+            theater: selectedTheater.name,
+            showtime: selectedShowtimeObj.startTime
+          }
+        });
+        setBookedSeats(res.data);
+      } catch (err) {
+        console.error('❌ Error fetching booked seats:', err.message);
+      }
+    };
+
+    fetchBookedSeats();
+  }, [selectedShowtimeObj, selectedTheater, movie]);
+
+  const isUpcoming = movie?.releaseDate && new Date(movie.releaseDate) > new Date();
+
   const toggleSeat = (seatId) => {
-    const seat = seatMap.find(s => s.id === seatId);
-    if (seat?.status === 'booked') return;
+    const isBooked = allBookedSeats.includes(seatId);
+    if (isBooked) return;
 
     if (selectedSeats.includes(seatId)) {
       setSelectedSeats(selectedSeats.filter(s => s !== seatId));
@@ -103,13 +143,9 @@ function BookMovie() {
       return null;
     }
 
-    const selectedTheater = theaters[parseInt(selectedTheaterIndex)];
-    const selectedShowtimeObj = selectedTheater.showtimes.find(st =>
-      new Date(st.startTime || st).toISOString() === new Date(selectedShowtime).toISOString()
-    );
-
-    if (!selectedShowtimeObj) {
-      setError('Invalid showtime selected.');
+    const invalid = selectedSeats.some(seat => allBookedSeats.includes(seat));
+    if (invalid) {
+      toast.error('One or more selected seats are already booked. Please choose different seats.');
       return null;
     }
 
@@ -118,29 +154,69 @@ function BookMovie() {
       seats: selectedSeats,
       theater: {
         name: selectedTheater?.name || '',
-        location: selectedTheater?.location || '',
+        location: selectedTheater?.location || ''
       },
-      showtimeId: selectedShowtimeObj._id,
+      showtimeId: selectedShowtimeObj?._id,
       showtimeDate: new Date(selectedShowtime).toISOString(),
-      amount: totalPrice * 100,
+      amount: totalPrice * 100
     };
   };
 
-  const initiatePayment = async () => {
-    const payload = await handleBooking();
-    if (!payload) return;
+    const initiatePayment = async () => {
+  const payload = await handleBooking();
+  if (!payload) return;
 
-    try {
-      await handleRazorpayPayment(payload, null, navigate);
-      setSuccess('🎉 Booking successful!');
-      setSelectedSeats([]);
-      setSelectedShowtime('');
-      setSelectedTheaterIndex('');
-    } catch (err) {
-      console.error('❌ Payment initiation failed:', err);
-      setError(err?.message || 'Payment failed. Please try again.');
-    }
-  };
+  const toastId = toast.loading('⏳ Processing your booking...');
+  setLoading(true);
+
+  try {
+    await handleRazorpayPayment(
+      payload,
+      setLoading,
+      navigate,
+      async () => {
+        try {
+          // Fetch booking details after payment success
+          const res = await axios.get('http://localhost:5000/api/bookings/confirmation', {
+            params: {
+              movieId: payload.movieId,
+              userId: JSON.parse(localStorage.getItem('user'))._id,
+              showtimeId: payload.showtimeId
+            },
+            headers: {
+    Authorization: `Bearer ${localStorage.getItem('token')}`
+            }
+          });
+
+          const bookingDetails = res.data;
+
+          toast.dismiss(toastId); // ✅ Dismiss only after booking details are received
+          toast.success('🎉 Booking confirmed!');
+          
+          // Optionally store or navigate with bookingDetails
+          console.log('✅ Booking Details:', bookingDetails);
+
+          setSelectedSeats([]);
+          setSelectedShowtime('');
+          setSelectedTheaterIndex('');
+        } catch (err) {
+          toast.dismiss(toastId);
+      
+        }
+      },
+      () => {
+        toast.dismiss(toastId);
+        toast.error('❌ Payment was cancelled.');
+      }
+    );
+  } catch (err) {
+    toast.dismiss(toastId);
+    console.error('❌ Payment initiation failed:', err);
+    toast.error(err?.message || 'Payment failed. Please try again.');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const formatShowtime = (time) => {
     if (!time) return 'Not selected';
@@ -150,31 +226,16 @@ function BookMovie() {
 
   const user = JSON.parse(localStorage.getItem('user'));
 
-  if (loading) {
-    return (
-      <div className="p-6 text-center text-lg animate-pulse text-gray-600">
-        Loading movie details and theaters...
-      </div>
-    );
-  }
-
-  if (error) {
-    return <div className="p-6 text-center text-red-500">{error}</div>;
-  }
-
-  if (!movie) {
-    return <div className="p-6 text-center text-red-500">Movie not found.</div>;
-  }
+  if (loading) return <div className="p-6 text-center text-lg animate-pulse text-gray-600">Loading movie details and theaters...</div>;
+  if (error) return <div className="p-6 text-center text-red-500">{error}</div>;
+  if (!movie) return <div className="p-6 text-center text-red-500">Movie not found.</div>;
+  if (isUpcoming) return <div className="p-6 text-center text-gray-400">Booking will open after {new Date(movie.releaseDate).toLocaleDateString()}.</div>;
 
   return (
     <div className="p-6 max-w-4xl mx-auto bg-white text-gray-900 rounded-lg shadow-lg">
       <h2 className="text-4xl font-bold mb-6 text-center text-red-600">{movie.title}</h2>
       <div className="flex justify-center mb-6">
-        <img
-          src={movie.posterUrl}
-          alt={movie.title}
-          className="w-64 h-[360px] object-cover rounded-xl shadow-lg"
-        />
+        <img src={movie.posterUrl} alt={movie.title} className="w-64 h-[360px] object-cover rounded-xl shadow-lg" />
       </div>
 
       {/* Trailer */}
@@ -194,36 +255,28 @@ function BookMovie() {
         </div>
       )}
 
-      {/* Movie Info */}
-      <div className="text-center mb-6">
-        <p className="text-gray-700">{movie.description}</p>
-        <p><strong>Genres:</strong> {movie.genre || 'N/A'}</p>
-        <p><strong>Rating:</strong> {movie.rating || 'N/A'}/10</p>
-      </div>
-
-      {/* Cast */}
-      {movie.cast?.length > 0 && (
-        <div className="mb-6">
-          <h3 className="text-xl font-semibold mb-4 text-center">Cast & Crew</h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 justify-center">
-            {movie.cast.map((actor, index) => (
-              <div key={index} className="flex items-center gap-3 bg-gray-50 p-3 rounded shadow-sm hover:shadow-md">
-                <img
-                  src={actor.photoUrl}
-                  alt={actor.name}
-                  className="w-12 h-12 rounded-full object-cover border"
-                />
-                <div>
-                  <p className="font-semibold text-gray-800">{actor.name}</p>
-                  <p className="text-sm text-gray-600">{actor.role}</p>
-                </div>
-              </div>
-            ))}
+      {/* 🎭 Cast & Crew */}
+  {movie.cast && movie.cast.length > 0 && (
+    <div className="mb-6">
+      <h3 className="text-xl font-semibold mb-4 text-center">Cast & Crew</h3>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 justify-center">
+        {movie.cast.map((actor, index) => (
+          <div key={index} className="flex items-center gap-3 bg-gray-50 p-3 rounded shadow-sm hover:shadow-md">
+            <img
+              src={actor.photoUrl}
+              alt={actor.name}
+              className="w-12 h-12 rounded-full object-cover border"
+            />
+            <div>
+              <p className="font-semibold text-gray-800">{actor.name}</p>
+              <p className="text-sm text-gray-600">{actor.role}</p>
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* Booking Controls */}
+        ))}
+      </div>
+    </div>
+  )}
+            {/* Booking Controls */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div>
           <label className="block font-semibold mb-1">Select Theater</label>
@@ -234,7 +287,7 @@ function BookMovie() {
               setSelectedShowtime('');
               setSelectedSeats([]);
             }}
-                        className="border p-2 rounded w-full bg-white"
+            className="border p-2 rounded w-full bg-white"
           >
             <option value="">-- Choose a theater --</option>
             {theaters.map((t, index) => (
@@ -249,18 +302,27 @@ function BookMovie() {
           <label className="block font-semibold mb-1">Select Showtime</label>
           <select
             value={selectedShowtime}
-            onChange={(e) => setSelectedShowtime(e.target.value)}
+            onChange={(e) => {
+              setSelectedShowtime(e.target.value);
+              setSelectedSeats([]);
+            }}
             className="border p-2 rounded w-full bg-white"
             disabled={!selectedTheater}
           >
             <option value="">-- Choose a showtime --</option>
-            {selectedTheater?.showtimes
-              ?.sort((a, b) => new Date(a.startTime || a) - new Date(b.startTime || b))
-              .map((st, idx) => (
-                <option key={st._id || idx} value={st.startTime || st}>
-                  {formatShowtime(st.startTime || st)}
-                </option>
-              ))}
+            {Array.isArray(selectedTheater?.showtimes)
+              ? selectedTheater.showtimes
+                  .filter(st => st && (st.startTime || typeof st === 'string'))
+                  .sort((a, b) => new Date(a.startTime || a) - new Date(b.startTime || b))
+                  .map((st, idx) => {
+                    const time = st.startTime || st;
+                    return (
+                      <option key={st._id || idx} value={time}>
+                        {formatShowtime(time)}
+                      </option>
+                    );
+                  })
+              : <option disabled>No showtimes available</option>}
           </select>
         </div>
 
@@ -282,37 +344,51 @@ function BookMovie() {
       </div>
 
       {/* 🎟️ Seat Grid */}
-      <div className="flex justify-center mb-4 mt-6">
-        <div className="w-2/3 text-center text-sm font-semibold text-white bg-gradient-to-r from-gray-500 via-gray-400 to-gray-500 rounded-t-full py-1 shadow-md">
-          SCREEN
-        </div>
+{selectedTheaterIndex && selectedShowtime ? (
+  <>
+    <div className="flex justify-center mb-4 mt-6">
+      <div className="w-2/3 text-center text-sm font-semibold text-white bg-gradient-to-r from-gray-500 via-gray-400 to-gray-500 rounded-t-full py-1 shadow-md">
+        SCREEN
       </div>
+    </div>
 
-      <div className="space-y-3 mt-4 mb-6">
-        {rows.map(row => (
-          <div key={row} className="flex gap-2 justify-center">
-            {cols.map(col => {
-              const seatId = `${row}${col}`;
-              const seat = seatMap.find(s => s.id === seatId);
-              const isSelected = selectedSeats.includes(seatId);
-              const isBooked = seat?.status === 'booked';
-              return (
-                <button
-                  key={seatId}
-                  disabled={isBooked}
-                  onClick={() => toggleSeat(seatId)}
-                  className={`px-3 py-2 rounded border font-semibold text-sm
-                    ${isBooked ? 'bg-gray-500 text-white cursor-not-allowed' :
-                      isSelected ? 'bg-green-600 text-white' : 'bg-gray-200 hover:bg-gray-300'}
-                    transition duration-200`}
-                >
-                  {seatId}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+    <div className="space-y-3 mt-4 mb-6">
+      {rows.map(row => (
+        <div key={row} className="flex gap-2 justify-center">
+          {cols.map(col => {
+            const seatId = `${row}${col}`;
+            const isSelected = selectedSeats.includes(seatId);
+            const isBooked = allBookedSeats.includes(seatId);
+
+            return (
+              <button
+                key={seatId}
+                disabled={isBooked}
+                onClick={() => toggleSeat(seatId)}
+                title={isBooked ? 'Already booked' : 'Available'}
+                className={`px-3 py-2 rounded border font-semibold text-sm
+                  ${
+                    isBooked
+                      ? 'bg-gray-500 text-white cursor-not-allowed'
+                      : isSelected
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-200 hover:bg-gray-300'
+                  }
+                  transition duration-200`}
+              >
+                {seatId}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  </>
+) : (
+  <div className="text-center text-gray-500 italic mt-6 mb-6">
+    🎟️ Please select a theater and showtime to choose your seats.
+  </div>
+)}
 
       {/* 📋 Booking Summary */}
       <div className="mt-6 p-4 bg-gray-100 rounded shadow-sm text-center">

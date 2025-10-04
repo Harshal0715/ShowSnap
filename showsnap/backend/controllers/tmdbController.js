@@ -1,6 +1,17 @@
 import axios from 'axios';
+import axiosRetry from 'axios-retry';
 
 const supportedLanguages = ['en', 'hi', 'ta', 'te', 'ml', 'mr', 'kn', 'bn', 'gu', 'pa', 'ur'];
+
+// 🔁 Retry setup for transient errors
+axiosRetry(axios, {
+  retries: 3,
+  retryDelay: axiosRetry.exponentialDelay,
+  retryCondition: (error) =>
+    error.code === 'ECONNRESET' ||
+    axiosRetry.isNetworkError(error) ||
+    axiosRetry.isRetryableError(error)
+});
 
 // 🔍 Search TMDB movies with language fallback
 export const searchTmdbMovie = async (req, res) => {
@@ -13,28 +24,37 @@ export const searchTmdbMovie = async (req, res) => {
     if (!apiKey) return res.status(500).json({ error: 'TMDB API key not configured' });
 
     let results = [];
+    let matchedLang = '';
+
     for (const lang of supportedLanguages) {
       try {
         const tmdbRes = await axios.get('https://api.themoviedb.org/3/search/movie', {
           params: { api_key: apiKey, query, language: lang },
           timeout: 10000
         });
+
         if (tmdbRes.status === 200 && tmdbRes.data.results?.length > 0) {
           results = tmdbRes.data.results;
+          matchedLang = lang;
           break;
         }
       } catch (langErr) {
-        console.warn(`TMDB search failed for language ${lang}:`, langErr.response?.data || langErr.message);
-        continue;
+        console.warn(`TMDB search failed for ${lang}:`, langErr?.code || langErr.message);
       }
     }
 
     if (!results.length) {
       return res.status(404).json({ error: 'Movie not found in TMDB' });
     }
+
+    console.log(`✅ TMDB match found in language: ${matchedLang}`);
     res.status(200).json({ results });
   } catch (err) {
-    console.error('❌ TMDB search error:', err.response?.data || err.message);
+    console.error('❌ TMDB search error:', {
+      message: err.message,
+      code: err.code,
+      response: err.response?.data
+    });
     res.status(500).json({ error: 'Failed to fetch from TMDB' });
   }
 };
@@ -62,7 +82,6 @@ export const getTmdbMovieDetails = async (req, res) => {
 
     const details = detailsRes.data;
 
-    // build genres and cast
     const genres = Array.isArray(details.genres)
       ? details.genres.map(g => g.name).filter(Boolean)
       : [];
@@ -75,10 +94,18 @@ export const getTmdbMovieDetails = async (req, res) => {
         }))
       : [];
 
-    // 🔥 find YouTube trailer
     const videos = videosRes?.data?.results || [];
-    const trailer = videos.find(v => v.type === 'Trailer' && v.site === 'YouTube');
-    const trailerUrl = trailer ? `https://www.youtube.com/watch?v=${trailer.key}` : '';
+    const trailer =
+      videos.find(v => v.type === 'Trailer' && v.site === 'YouTube' && v.official) ||
+      videos.find(v => v.type === 'Trailer' && v.site === 'YouTube') ||
+      videos.find(v => ['Teaser', 'Clip'].includes(v.type) && v.site === 'YouTube');
+    const trailerUrl = trailer?.key
+      ? `https://www.youtube.com/watch?v=${trailer.key}`
+      : '';
+
+    const releaseDate = /^\d{4}-\d{2}-\d{2}$/.test(details.release_date)
+      ? details.release_date
+      : '';
 
     res.status(200).json({
       title: details.title || '',
@@ -88,14 +115,18 @@ export const getTmdbMovieDetails = async (req, res) => {
       duration: `${details.runtime || 0} min`,
       posterUrl: details.poster_path ? `https://image.tmdb.org/t/p/w500${details.poster_path}` : '',
       trailerUrl,
-      releaseDate: details.release_date || '',
+      releaseDate,
       language: supportedLanguages.includes(details.original_language)
         ? details.original_language
         : 'en',
       cast
     });
   } catch (err) {
-    console.error('❌ TMDB details fetch error:', err.response?.data || err.message);
+    console.error('❌ TMDB details fetch error:', {
+      message: err.message,
+      code: err.code,
+      response: err.response?.data
+    });
     res.status(500).json({ error: 'Failed to fetch movie details' });
   }
 };

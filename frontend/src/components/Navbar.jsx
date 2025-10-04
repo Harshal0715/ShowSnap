@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { HiMenu, HiX } from 'react-icons/hi';
+import { LocationContext } from '../context/LocationContext';
 
 function Navbar() {
   const navigate = useNavigate();
@@ -11,9 +12,10 @@ function Navbar() {
     setIsAuthenticated = () => {}
   } = useContext(AuthContext) || {};
 
+  const { location, setLocation } = useContext(LocationContext); // ✅ Use context
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // 🔄 Sync localStorage with context
+  // 🔄 Sync localStorage with context (already handled in LocationContext)
   useEffect(() => {
     const storedUser = localStorage.getItem('user');
     if (storedUser) {
@@ -58,6 +60,19 @@ function Navbar() {
 
         {/* Desktop Menu */}
         <div className="hidden md:flex items-center gap-6">
+          {/* 🌍 Location Selector */}
+          <select
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            className="px-3 py-1 rounded bg-white text-black text-sm"
+            aria-label="Select Location"
+          >
+            <option value="">Location</option>
+            <option value="Mumbai">Mumbai</option>
+            <option value="Thane">Thane</option>
+            <option value="Navi Mumbai">Navi Mumbai</option>
+          </select>
+
           {menuItems.map(item => (
             <NavLink
               key={item.path}
@@ -122,6 +137,19 @@ function Navbar() {
       {/* Mobile Dropdown */}
       {menuOpen && (
         <div className="md:hidden bg-[#121212] px-4 py-3 flex flex-col gap-3 border-t border-gray-800 transition-all duration-300 ease-in-out">
+          {/* 🌍 Location Selector */}
+          <select
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            className="px-3 py-2 rounded bg-white text-black text-sm"
+            aria-label="Select Location"
+          >
+            <option value="">Location</option>
+            <option value="Mumbai">Mumbai</option>
+            <option value="Thane">Thane</option>
+            <option value="Navi Mumbai">Navi Mumbai</option>
+          </select>
+
           {menuItems.map(item => (
             <NavLink
               key={item.path}

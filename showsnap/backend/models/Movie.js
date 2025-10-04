@@ -23,6 +23,35 @@ const castSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// 🕒 Showtime schema (embedded inside each theater)
+const showtimeSchema = new mongoose.Schema(
+  {
+    startTime: {
+      type: Date,
+      required: true
+    },
+    screen: {
+      type: String,
+      trim: true,
+      default: 'Screen 1'
+    },
+    availableSeats: {
+      type: Number,
+      default: 100,
+      min: 0
+    },
+    blockedSeats: {
+      type: [String],
+      default: []
+    },
+    movie: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Movie'
+    }
+  },
+  { _id: false }
+);
+
 // 🎟️ Embedded theater schema (for frontend rendering)
 const embeddedTheaterSchema = new mongoose.Schema(
   {
@@ -37,12 +66,8 @@ const embeddedTheaterSchema = new mongoose.Schema(
       trim: true
     },
     showtimes: {
-      type: [Date],
-      default: [],
-      validate: {
-        validator: arr => Array.isArray(arr),
-        message: 'Showtimes must be an array of dates'
-      }
+      type: [showtimeSchema],
+      default: []
     }
   },
   { _id: false }
@@ -100,7 +125,6 @@ const movieSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Language is required'],
       trim: true,
-      // ✅ Comprehensive enum list matching frontend `supportedLanguages`
       enum: ['en', 'hi', 'ta', 'te', 'ml', 'mr', 'kn', 'bn', 'gu', 'pa', 'ur'],
       message: 'Language code "{VALUE}" is not supported.'
     },
@@ -121,11 +145,9 @@ const movieSchema = new mongoose.Schema(
       type: [castSchema],
       default: []
     },
-    theaters: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Theater'
-    }],
-    embeddedTheaters: { // This field holds the actual theater data copied at creation
+    // ❌ Removed referenced theaters to avoid CastError
+    // theaters: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Theater' }],
+    embeddedTheaters: {
       type: [embeddedTheaterSchema],
       default: []
     }
@@ -142,7 +164,13 @@ movieSchema.index({ language: 1 });
 movieSchema.index({ releaseDate: -1 });
 movieSchema.index({ isFeatured: 1 });
 movieSchema.index({ status: 1 });
-movieSchema.index({ title: 'text', description: 'text', genre: 'text', tags: 'text' });
+//movieSchema.index(
+  //{ title: 'text', description: 'text', genre: 'text', tags: 'text' },
+  //{
+    //default_language: 'none',
+    //language_override: 'langOverride'
+  //}
+//);
 
 // 🧼 Normalize title before saving
 movieSchema.pre('save', function (next) {

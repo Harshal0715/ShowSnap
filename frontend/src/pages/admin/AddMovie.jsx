@@ -23,7 +23,6 @@ function AddMovie() {
   const navigate = useNavigate();
   const [token] = useState(localStorage.getItem('token'));
 
-  // Movie fields
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [genre, setGenre] = useState('');
@@ -34,21 +33,17 @@ function AddMovie() {
   const [releaseDate, setReleaseDate] = useState('');
   const [language, setLanguage] = useState('en');
 
-  // Cast
   const [cast, setCast] = useState([]);
   const [castName, setCastName] = useState('');
   const [castRole, setCastRole] = useState('');
   const [castPhotoUrl, setCastPhotoUrl] = useState('');
 
-  // Theaters
   const [availableTheaters, setAvailableTheaters] = useState([]);
-  const [selectedTheaterIds, setSelectedTheaterIds] = useState([]);
+  const [embeddedTheaters, setEmbeddedTheaters] = useState([]);
 
-  // TMDB
   const [tmdbQuery, setTmdbQuery] = useState('');
   const [fetching, setFetching] = useState(false);
 
-  // Fetch theaters on load
   useEffect(() => {
     if (!token) {
       toast.error('Session expired. Please log in again.');
@@ -70,7 +65,6 @@ function AddMovie() {
     fetchTheaters();
   }, [navigate, token]);
 
-  // Add cast member
   const addCastMember = () => {
     if (!castName.trim() || !castRole.trim()) {
       toast.error('Cast name and role are required');
@@ -91,11 +85,18 @@ function AddMovie() {
   };
 
   const handleTheaterChange = (e) => {
-    const selected = Array.from(e.target.selectedOptions, option => option.value);
-    setSelectedTheaterIds(selected);
+    const selectedIds = Array.from(e.target.selectedOptions, option => option.value);
+    const selected = availableTheaters.filter(t => selectedIds.includes(t._id));
+
+    const embedded = selected.map(t => ({
+      name: t.name,
+      location: t.location,
+      showtimes: [] // You can add showtime input later
+    }));
+
+    setEmbeddedTheaters(embedded);
   };
 
-  // Fetch from TMDB
   const handleTmdbSearch = async () => {
     if (!tmdbQuery.trim()) return toast.error('Enter a movie name to search');
     if (!token) {
@@ -106,7 +107,6 @@ function AddMovie() {
 
     setFetching(true);
     try {
-      // Search TMDB
       const searchRes = await axios.get(`${API_URL}/api/admin/tmdb/search`, {
         params: { query: tmdbQuery.trim() },
         headers: { Authorization: `Bearer ${token}` }
@@ -118,22 +118,19 @@ function AddMovie() {
       }
 
       const movie = searchRes.data.results[0];
-
-      // Details
       const detailsRes = await axios.get(`${API_URL}/api/admin/tmdb/movie/${movie.id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
       const movieData = detailsRes.data || {};
 
-      // ✅ Populate fields directly from backend
       setTitle(movieData.title || '');
       setDescription(movieData.description || '');
       setGenre(movieData.genre || '');
       setRating(movieData.rating || '');
       setDuration(movieData.duration || '');
       setPosterUrl(movieData.posterUrl || '');
-      setTrailerUrl(movieData.trailerUrl || ''); // 🔥 now real YouTube trailer
+      setTrailerUrl(movieData.trailerUrl || '');
       setReleaseDate(movieData.releaseDate || '');
       setLanguage(movieData.language || 'en');
 
@@ -155,7 +152,6 @@ function AddMovie() {
     }
   };
 
-  // Submit movie
   const handleSubmit = async () => {
     if (!title.trim() || !genre.trim() || !posterUrl.trim() || !releaseDate || !language.trim()) {
       toast.error('Please fill all required movie fields');
@@ -179,11 +175,21 @@ function AddMovie() {
       releaseDate: parsedDate.toISOString(),
       language: language.trim(),
       cast,
-      theaters: selectedTheaterIds.map(id => ({ _id: id, showtimes: [] }))
+      embeddedTheaters: embeddedTheaters.map(t => ({
+    ...t,
+    showtimes: [
+      {
+        startTime: new Date(Date.now() + 3600000).toISOString(),
+        screen: 'Screen 1',
+        availableSeats: 100,
+        blockedSeats: []
+      }
+    ]
+  }))
     };
 
     try {
-      await axios.post(`${API_URL}/api/admin/movies`, newMovie, {
+      await axios.post(`${API_URL}/api/movies`, newMovie, {
         headers: { Authorization: `Bearer ${token}` }
       });
       toast.success('🎉 Movie added successfully!');
@@ -266,7 +272,7 @@ function AddMovie() {
 
       {/* Theaters */}
       <section className="mb-6">
-        <h3 className="text-lg font-semibold mb-2">🏢 Theaters</h3>
+        <h3 className="text-lg font-semibold mb-2"> Theaters</h3>
         <select multiple onChange={handleTheaterChange} className={`${inputClass} h-40`}>
           {availableTheaters.length > 0 ? (
             availableTheaters.map(t => (
@@ -278,9 +284,9 @@ function AddMovie() {
             <option disabled>No theaters available</option>
           )}
         </select>
-        {selectedTheaterIds.length > 0 && (
+        {embeddedTheaters.length > 0 && (
           <p className="text-sm mt-2">
-            Selected: {selectedTheaterIds.length} theater{selectedTheaterIds.length > 1 ? 's' : ''}
+            Selected: {embeddedTheaters.length} theater{embeddedTheaters.length > 1 ? 's' : ''}
           </p>
         )}
       </section>

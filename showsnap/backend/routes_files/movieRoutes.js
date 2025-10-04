@@ -2,7 +2,8 @@ import express from 'express';
 import {
   getMovies,
   getMovieById,
-  getAllGenres
+  getAllGenres,
+  createMovie
 } from '../controllers/movieController.js';
 
 const router = express.Router();
@@ -15,5 +16,7 @@ router.get('/movies/:id', getMovieById);
 
 // 🎭 Get all unique genres for filtering UI
 router.get('/movies/genres', getAllGenres);
+
+router.post('/movies', createMovie);
 
 export default router;

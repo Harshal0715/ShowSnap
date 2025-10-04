@@ -1,5 +1,6 @@
+import mongoose from 'mongoose';
 import Movie from '../models/Movie.js';
-import Theater from '../models/Theater.js'; // Used indirectly in createMovie
+import Theater from '../models/Theater.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -15,52 +16,103 @@ export const getMovies = async (req, res) => {
       language,
       releasedAfter,
       sortBy,
+      title,
       page = 1,
       limit = 20,
     } = req.query;
 
-    const query = {};
+    const location = req.query.location?.trim();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Combine releaseDate filters safely
+    const filters = [];
+
+    // 🎯 Release date filters
     if (isUpcoming === 'true') {
-      query.releaseDate = { ...(query.releaseDate || {}), $gt: today };
+      filters.push({ releaseDate: { $gt: today } });
     }
     if (isUpcoming === 'false') {
-      query.releaseDate = { ...(query.releaseDate || {}), $lte: today };
+      filters.push({ releaseDate: { $lte: today } });
     }
     if (releasedAfter && !isNaN(Date.parse(releasedAfter))) {
-      query.releaseDate = { ...(query.releaseDate || {}), $gte: new Date(releasedAfter) };
+      filters.push({ releaseDate: { $gte: new Date(releasedAfter) } });
     }
 
+    // 📍 Location filter
+    if (location) {
+      filters.push({
+        'embeddedTheaters.location': {
+          $regex: location,
+          $options: 'i'
+        }
+      });
+    }
+
+    // 🎬 Genre filter
     if (genre?.trim()) {
-      query.genre = { $regex: genre.trim(), $options: 'i' };
+      filters.push({
+        genre: { $regex: genre.trim(), $options: 'i' }
+      });
     }
 
+    // ⭐ Rating filter
     if (minRating && !isNaN(minRating)) {
-      query.rating = { $gte: parseFloat(minRating) };
+      filters.push({
+        rating: { $gte: parseFloat(minRating) }
+      });
     }
 
+    // 🗣️ Language filter
     if (language?.trim()) {
-      query.language = { $regex: language.trim(), $options: 'i' };
+      filters.push({
+        language: { $regex: language.trim(), $options: 'i' }
+      });
     }
 
+    // 🔃 Sorting
     const sortOptions = {};
     if (sortBy === 'rating') sortOptions.rating = -1;
     if (sortBy === 'releaseDate') sortOptions.releaseDate = -1;
 
+    // 📄 Pagination
     const safeLimit = Math.min(Number(limit), 100);
     const safePage = Math.max(Number(page), 1);
 
-    const movies = await Movie.find(query)
-      .populate('theaters', 'name location showtimes')
-      .sort(sortOptions)
-      .skip((safePage - 1) * safeLimit)
-      .limit(safeLimit)
-      .lean();
+    // 🔍 Use Atlas Search if title is provided
+    const pipeline = [];
 
-    const total = await Movie.countDocuments(query);
+    if (title?.trim()) {
+      pipeline.push({
+        $search: {
+          index: 'movieSearch',
+          text: {
+            query: title.trim(),
+            path: ['titleEnglish', 'title', 'description'],
+            fuzzy: {}
+          }
+        }
+      });
+    }
+
+    // 🧩 Apply filters
+    if (filters.length > 0) {
+      pipeline.push({ $match: { $and: filters } });
+    }
+
+    // 🔃 Sorting
+    if (Object.keys(sortOptions).length > 0) {
+      pipeline.push({ $sort: sortOptions });
+    }
+
+    // 📄 Pagination
+    pipeline.push({ $skip: (safePage - 1) * safeLimit });
+    pipeline.push({ $limit: safeLimit });
+
+    // 🧮 Count total (optional: estimate only)
+    const movies = await Movie.aggregate(pipeline);
+    const total = title?.trim()
+      ? movies.length // fallback if using $search
+      : await Movie.countDocuments(filters.length ? { $and: filters } : {});
 
     res.status(200).json({
       count: movies.length,
@@ -77,36 +129,36 @@ export const getMovies = async (req, res) => {
 
 /**
  * GET /api/movies/:id
- * Fetch a single movie by ID with populated theater data
+ * Fetch a single movie by ID with embedded theater data
  */
 export const getMovieById = async (req, res) => {
-  try {
-    const { id } = req.params;
+  const { id } = req.params;
 
-    if (!id || !id.trim()) {
-      return res.status(400).json({ error: 'Missing or invalid movie ID' });
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: 'Invalid movie ID' });
+  }
+
+  try {
+    const movie = await Movie.findById(id).lean();
+    if (!movie) {
+      return res.status(404).json({ error: 'Movie not found' });
     }
 
-    const movie = await Movie.findById(id).lean();
-
-    if (!movie) return res.status(404).json({ error: 'Movie not found' });
-
-    // ✅ Use embeddedTheaters if present
     const embedded = Array.isArray(movie.embeddedTheaters) ? movie.embeddedTheaters : [];
 
-    // Normalize showtimes
     embedded.forEach((t) => {
       if (Array.isArray(t.showtimes)) {
-        t.showtimes = t.showtimes.map((s) => new Date(s).toISOString());
+        t.showtimes = t.showtimes.map((s) => ({
+          ...s,
+          startTime: new Date(s.startTime).toISOString()
+        }));
       }
     });
 
-    // Normalize releaseDate
     movie.releaseDate = movie.releaseDate
       ? new Date(movie.releaseDate).toISOString()
       : null;
 
-    // ✅ Send embedded theaters as 'theaters' for frontend compatibility
     res.status(200).json({
       ...movie,
       theaters: embedded
@@ -128,5 +180,20 @@ export const getAllGenres = async (req, res) => {
   } catch (err) {
     logger.error(`❌ Error fetching genres: ${err.message}`);
     res.status(500).json({ error: 'Server error while fetching genres' });
+  }
+};
+
+/**
+ * POST /api/movies
+ * Create a new movie with embedded theaters
+ */
+export const createMovie = async (req, res) => {
+  try {
+    const newMovie = new Movie(req.body); // includes embeddedTheaters
+    const savedMovie = await newMovie.save();
+    res.status(201).json(savedMovie);
+  } catch (err) {
+    logger.error(`❌ Error creating movie: ${err.message}`);
+    res.status(400).json({ error: 'Failed to create movie', details: err.message });
   }
 };
